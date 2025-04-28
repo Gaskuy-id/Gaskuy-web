@@ -6,13 +6,11 @@ import CarInformation from "../../components/CarInformation";
 import { FaArrowRight, FaArrowLeft } from "react-icons/fa";
 import { Link } from "react-router-dom";
 
-// import images from "../../utils/imageLoader";
-
 const Booking = () => {
   const [cars, setCars] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [tipeLayanan, setTipeLayanan] = useState("");  // Ini perlu ada di sini
+  const [tipeLayanan, setTipeLayanan] = useState("");
 
   const carsPerPage = 8; // jumlah mobil per halaman
 
@@ -110,7 +108,7 @@ const Booking = () => {
                     imageSrc={car.imageSrc}
                     alt={car.title}
                     pricePerDay={car.pricePerDay}
-                    speed={car.speed}
+                    engineCapacity={car.engineCapacity}
                     fuelCapacity={car.fuelCapacity}
                     transmission={car.transmission}
                     seats={car.seats}
