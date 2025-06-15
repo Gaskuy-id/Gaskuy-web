@@ -1,17 +1,57 @@
 import React, { useState, useEffect, useMemo } from "react"; 
 import { Icon } from "@iconify/react";
 import clsx from "clsx";
+import API from "../../utils/api";
 
-// Styles untuk badge status
+// Styles untuk badge status - Updated to match all possible statuses
 const statusStyles = {
-  "Proses Pengambilan": "bg-gray-300 text-black",
-  "Dalam Penjemputan": "bg-pink-300 text-black",
-  "Dalam Proses": "bg-blue-300 text-black",
-  "Sudah Selesai": "bg-green-300 text-black",
-  "Bayar Denda": "bg-red-300 text-black",
-  "Dibatalkan": "bg-yellow-300 text-black",
-  "Pengembalian Mobil": "bg-purple-300 text-black",
-  "Pengembalian Dana": "bg-amber-300 text-black",
+  "Konfirmasi Pembayaran": "bg-yellow-100 text-yellow-800 border border-yellow-200",
+  "Dibatalkan": "bg-red-100 text-red-800 border border-red-200",
+  "Konfirmasi Pengambilan": "bg-blue-100 text-blue-800 border border-blue-200",
+  "Kendaraan Digunakan": "bg-green-100 text-green-800 border border-green-200",
+  "Pengecekan Denda": "bg-orange-100 text-orange-800 border border-orange-200",
+  "Konfirmasi Pembayaran Denda": "bg-purple-100 text-purple-800 border border-purple-200",
+  "Konfirmasi Pengembalian": "bg-indigo-100 text-indigo-800 border border-indigo-200",
+  "Selesai": "bg-emerald-100 text-emerald-800 border border-emerald-200",
+  
+  // Legacy statuses (compatibility)
+  "Proses Pengambilan": "bg-blue-100 text-blue-800 border border-blue-200",
+  "Dalam Proses": "bg-yellow-100 text-yellow-800 border border-yellow-200",
+  "Sudah Selesai": "bg-emerald-100 text-emerald-800 border border-emerald-200",
+};
+
+// Helper function to determine status from confirmations
+const getStatusFromConfirmations = (element) => {
+  const date = new Date();
+  const confirmations = element.confirmations;
+  console.log("Confirmations:", confirmations);
+  if (!confirmations ||confirmations.paymentPaid) {
+    return "Konfirmasi Pembayaran";
+  } 
+  else if (confirmations.paymentPaid === false) {
+    return "Dibatalkan";
+  } 
+  else if (confirmations.paymentPaid === true && confirmations.vehicleTaken !== true) {
+    return "Konfirmasi Pengambilan";
+  } 
+  else if (confirmations.vehicleTaken === true && date < new Date(element.finishedAt)) {
+    return "Kendaraan Digunakan";
+  } 
+  else if (confirmations.vehicleTaken === true && date > new Date(element.finishedAt) && confirmations.hasFine === undefined) {
+    return "Pengecekan Denda";
+  } 
+  else if (confirmations.hasFine === true && confirmations.finePaid !== true) {
+    return "Konfirmasi Pembayaran Denda";
+  } 
+  else if (confirmations.finePaid === true && confirmations.vehicleReturned !== true) {
+    return "Konfirmasi Pengembalian";
+  } 
+  else if (confirmations.vehicleReturned === true) {
+    return "Selesai";
+  }
+  
+  // Default fallback
+  return "Konfirmasi Pembayaran";
 };
 
 // Dummy summary metrics
@@ -26,63 +66,8 @@ const DUMMY_SUMMARY = {
   refunds: 20,
 };
 
-// Dummy transaksi
-const DUMMY_TRANSACTIONS = [
-  {
-    id: "tx001",
-    customer: "Akira Nagai",
-    vehicle: "Burok Gus Faqih",
-    transactionId: "ABC123",
-    startDate: "14/03/2025, 23:37",
-    endDate: "15/03/2025, 02:30",
-    status: "Proses Pengambilan",
-    amount: 600000,
-    penalty: 50000, // denda
-    phone: "089281231273",
-    email: "akiranagai@gmail.com",
-    pickupLocation: "Kantor Rental",
-    driverName: "-",
-    driverPhone: "-",
-    lastMaintenance: "14/01/2025",
-  },
-  {
-    id: "tx002",
-    customer: "Maria Dewi",
-    vehicle: "Burok Gus Aspa",
-    transactionId: "DEF456",
-    startDate: "01/04/2025, 10:00",
-    endDate: "01/04/2025, 14:00",
-    status: "Dalam Proses",
-    amount: 800000,
-    penalty: 0,
-    phone: "081234567890",
-    email: "maria.dewi@example.com",
-    pickupLocation: "Bandung Office",
-    driverName: "Budi Santoso",
-    driverPhone: "082112345678",
-    lastMaintenance: "20/02/2025",
-  },
-  {
-    id: "tx003",
-    customer: "Joko Widodo",
-    vehicle: "Burok Gus Asri",
-    transactionId: "GHI789",
-    startDate: "05/04/2025, 08:30",
-    endDate: "05/04/2025, 12:45",
-    status: "Sudah Selesai",
-    amount: 700000,
-    penalty: 75000,
-    phone: "081998877665",
-    email: "jokowi@example.com",
-    pickupLocation: "Semarang HQ",
-    driverName: "Siti Aminah",
-    driverPhone: "085556677889",
-    lastMaintenance: "10/03/2025",
-  },
-];
-
-export default function AdminGeneralDriver() {
-  // === state ===
+export default function AdminGeneralDriver({ selectedBranchId }) {
+  // === State ===
   const [summary, setSummary] = useState({
     income: 0,
     expense: 0,
@@ -97,14 +82,79 @@ export default function AdminGeneralDriver() {
   const [expandedRow, setExpandedRow] = useState(null);
   const [q, setQ] = useState("");
 
-  // === mimic fetching data on mount ===
+  // === Fetch data on mount ===
   useEffect(() => {
-    // simulate API response
-    setSummary(DUMMY_SUMMARY);
-    setTransactions(DUMMY_TRANSACTIONS);
-  }, []);
+    const fetchTransactions = async () => {
+      console.log("Selected Branch ID:", selectedBranchId);
+      if (!selectedBranchId) return;
+      
+      try {
+        const res = await API.get(`/cms/rentals?branchId=${selectedBranchId}`);
+        console.log("API Response:", res.data.data);
+        
+        let newData = [];
+        let summaryData = {
+          income: 0,
+          expense: 0,
+          totalTransactions: 0,
+          completed: 0,
+          inProcess: 0,
+          penalties: 0,
+          cancelled: 0,
+          refunds: 0,
+        };
 
-  // configure metrics
+        res.data.data.forEach(element => {
+          const status = getStatusFromConfirmations(element);
+          
+          // Calculate summary metrics
+          summaryData.totalTransactions++;
+          summaryData.income += element.amount || 0;
+          
+          if (status === "Selesai") {
+            summaryData.completed++;
+          } else if (status === "Dibatalkan") {
+            summaryData.cancelled++;
+          } else {
+            summaryData.inProcess++;
+          }
+          
+          if (element.penalty > 0) {
+            summaryData.penalties++;
+          }
+
+          newData.push({
+            id: element._id,
+            customer: element.ordererName,
+            vehicle: element.vehicleId?.name || "N/A",
+            transactionId: element.transactionId,
+            startDate: element.startedAt,
+            endDate: element.finishedAt,
+            status: status,
+            amount: element.amount || 0,
+            penalty: element.penalty || 0,
+            phone: element.ordererPhone,
+            email: element.ordererEmail,
+            pickupLocation: element.locationStart,
+            driverName: element.driverId?.fullName || "-",
+            driverPhone: element.driverId?.phoneNumber || "-",
+            lastMaintenance: element.lastMaintenance || "-",
+          });
+        });
+
+        setTransactions(newData);
+        setSummary(summaryData);
+      } catch (error) {
+        console.error("Error fetching transactions:", error);
+        // Use dummy data as fallback
+        setSummary(DUMMY_SUMMARY);
+      }
+    };
+
+    fetchTransactions();
+  }, [selectedBranchId]);
+
+  // Configure metrics
   const metrics = [
     {
       icon: "mdi:currency-usd",
@@ -148,12 +198,12 @@ export default function AdminGeneralDriver() {
   const formatValue = (v, cur) =>
     cur ? `Rp${v.toLocaleString("id-ID")}` : v.toLocaleString();
 
-  // filter transaksi
+  // Filter transaksi
   const filtered = useMemo(
     () =>
       transactions.filter((t) =>
         [t.customer, t.vehicle, t.transactionId]
-          .some((str) => str.toLowerCase().includes(q.toLowerCase()))
+          .some((str) => str?.toLowerCase().includes(q.toLowerCase()))
       ),
     [transactions, q]
   );
@@ -161,7 +211,7 @@ export default function AdminGeneralDriver() {
   const toggleRow = (i) =>
     setExpandedRow(expandedRow === i ? null : i);
 
-  // Komponen detail
+  // Komponen detail transaction
   const TransactionDetail = ({ t }) => {
     // State untuk menyimpan jawaban setiap pertanyaan
     const [answers, setAnswers] = useState({});
@@ -178,12 +228,57 @@ export default function AdminGeneralDriver() {
       { label: "No Telp Driver", value: t.driverPhone || "-" },
       { label: "Terakhir maintenance mobil", value: t.lastMaintenance || "-" },
     ];
-    const questions = [
-      "Apakah Customer Meminta Pengembalian Dana?",
-      "Apakah Mobil Sudah Diberikan?",
-      "Apakah Mobil Sudah Dikembalikan?",
-      "Apakah Customer Membayar Denda?",
+
+    const baseQuestions = [
+      { id: 0, text: "Apakah Customer Sudah Bayar?", type: "yesNo" },
+      { id: 1, text: "Apakah Mobil Sudah Diberikan?", type: "confirmOnly" },
+      { id: 2, text: "Apakah Customer Membayar Denda?", type: "yesNo" },
+      { id: 3, text: "Apakah Mobil Sudah Dikembalikan?", type: "confirmOnly" },
     ];
+
+    // Pertanyaan dinamis berdasarkan kondisi
+    const getQuestions = () => {
+      let questions = [...baseQuestions];
+      
+      // Jika pertanyaan "Apakah Customer Membayar Denda?" dijawab "yes" dan dikonfirmasi
+      if (answers[2] === 'yes' && confirmed[2]) {
+        // Insert pertanyaan follow-up sebelum pertanyaan terakhir
+        questions.splice(3, 0, {
+          id: 4,
+          text: "Apakah Customer Sudah membayar denda?",
+          type: "confirmOnly"
+        });
+      }
+      
+      return questions;
+    };
+
+    // Fungsi untuk mengecek apakah pertanyaan bisa diakses (tidak disabled)
+    const isQuestionAccessible = (questionIndex) => {
+      // Jika transaksi dibatalkan, hanya pertanyaan pertama yang bisa diakses
+      if (isTransactionCancelled() && questionIndex !== 0) {
+        return false;
+      }
+      
+      // Pertanyaan pertama selalu bisa diakses
+      if (questionIndex === 0) return true;
+      
+      // Untuk pertanyaan lainnya, cek apakah pertanyaan sebelumnya sudah dikonfirmasi
+      const questions = getQuestions();
+      const currentQuestionIndex = questions.findIndex(q => q.id === questionIndex);
+      
+      if (currentQuestionIndex === 0) return true;
+      
+      // Cek semua pertanyaan sebelumnya sudah dikonfirmasi
+      for (let i = 0; i < currentQuestionIndex; i++) {
+        const prevQuestion = questions[i];
+        if (!confirmed[prevQuestion.id]) {
+          return false;
+        }
+      }
+      
+      return true;
+    };
 
     const handleAnswerChange = (questionIndex, answer) => {
       setAnswers(prev => ({
@@ -193,29 +288,65 @@ export default function AdminGeneralDriver() {
     };
 
     const handleConfirm = (questionIndex) => {
-      // Hanya bisa konfirmasi jika sudah ada jawaban
-      if (answers[questionIndex]) {
+      const question = getQuestions().find(q => q.id === questionIndex);
+      
+      if (question.type === 'confirmOnly') {
+        // Untuk pertanyaan confirm only, langsung konfirmasi
         setConfirmed(prev => ({
           ...prev,
           [questionIndex]: true
         }));
+      } else {
+        // Untuk pertanyaan yes/no, hanya bisa konfirmasi jika sudah ada jawaban
+        if (answers[questionIndex]) {
+          setConfirmed(prev => ({
+            ...prev,
+            [questionIndex]: true
+          }));
+          
+          // Jika pertanyaan pertama dijawab "no" dan dikonfirmasi, batalkan semua pertanyaan lainnya
+          if (questionIndex === 0 && answers[questionIndex] === 'no') {
+            const allQuestions = getQuestions();
+            const cancelledConfirmations = {};
+            
+            // Set semua pertanyaan lain sebagai "dibatalkan"
+            allQuestions.forEach(q => {
+              if (q.id !== 0) {
+                cancelledConfirmations[q.id] = 'cancelled';
+              }
+            });
+            
+            setConfirmed(prev => ({
+              ...prev,
+              ...cancelledConfirmations
+            }));
+          }
+        }
       }
+    };
+
+    // Fungsi untuk mengecek apakah transaksi dibatalkan
+    const isTransactionCancelled = () => {
+      return answers[0] === 'no' && confirmed[0];
     };
 
     const AnswerButton = ({ questionIndex, type, isSelected, isDisabled }) => {
       const isNo = type === 'no';
+      const isQuestionDisabled = !isQuestionAccessible(questionIndex);
+      const finalDisabled = isDisabled || isQuestionDisabled;
+      
       const baseClasses = "w-6 h-6 border-2 rounded cursor-pointer flex items-center justify-center transition-all duration-200";
       const selectedClasses = isNo 
         ? "border-red-500 bg-red-500" 
         : "border-green-500 bg-green-500";
-      const unselectedClasses = isDisabled 
+      const unselectedClasses = finalDisabled 
         ? "border-gray-300 bg-gray-100 cursor-not-allowed" 
         : "border-gray-300 bg-white hover:border-gray-400";
 
       return (
         <button
-          onClick={() => !isDisabled && handleAnswerChange(questionIndex, type)}
-          disabled={isDisabled}
+          onClick={() => !finalDisabled && handleAnswerChange(questionIndex, type)}
+          disabled={finalDisabled}
           className={clsx(baseClasses, isSelected ? selectedClasses : unselectedClasses)}
         >
           {isSelected && (
@@ -245,50 +376,62 @@ export default function AdminGeneralDriver() {
           
           {/* Right side - Questions */}
           <div className="space-y-4">
-            {questions.map((question, index) => {
-              const isConfirmed = confirmed[index];
-              const hasAnswer = answers[index];
+            {getQuestions().map((question) => {
+              const isConfirmed = confirmed[question.id];
+              const isCancelled = confirmed[question.id] === 'cancelled';
+              const hasAnswer = answers[question.id];
+              const isConfirmOnly = question.type === 'confirmOnly';
+              const isAccessible = isQuestionAccessible(question.id);
+              const isTransCancelled = isTransactionCancelled();
               
               return (
                 <div 
-                  key={index} 
+                  key={question.id} 
                   className={clsx(
                     "flex items-center justify-between gap-4 p-3 rounded-md transition-all duration-300",
-                    isConfirmed ? "bg-gray-100" : "bg-transparent"
+                    (isConfirmed || isCancelled) ? "bg-gray-100" : "bg-transparent",
+                    (!isAccessible || isTransCancelled) && question.id !== 0 ? "opacity-50" : "opacity-100"
                   )}
                 >
                   <span className={clsx(
                     "text-sm flex-1",
-                    isConfirmed ? "text-gray-500" : "text-gray-700"
+                    (isConfirmed || isCancelled) ? "text-gray-500" : 
+                    isAccessible && !isTransCancelled ? "text-gray-700" : "text-gray-400"
                   )}>
-                    {question}
+                    {question.text}
                   </span>
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <AnswerButton 
-                        questionIndex={index} 
-                        type="no" 
-                        isSelected={answers[index] === 'no'} 
-                        isDisabled={isConfirmed}
-                      />
-                      <AnswerButton 
-                        questionIndex={index} 
-                        type="yes" 
-                        isSelected={answers[index] === 'yes'} 
-                        isDisabled={isConfirmed}
-                      />
-                    </div>
-                    {isConfirmed ? (
+                    {!isConfirmOnly && (
+                      <div className="flex items-center gap-2">
+                        <AnswerButton 
+                          questionIndex={question.id} 
+                          type="no" 
+                          isSelected={answers[question.id] === 'no'} 
+                          isDisabled={isConfirmed || isCancelled}
+                        />
+                        <AnswerButton 
+                          questionIndex={question.id} 
+                          type="yes" 
+                          isSelected={answers[question.id] === 'yes'} 
+                          isDisabled={isConfirmed || isCancelled}
+                        />
+                      </div>
+                    )}
+                    {(isConfirmed && !isCancelled) ? (
                       <div className="px-4 py-1.5 text-sm text-gray-500 border border-gray-300 rounded-md bg-gray-50">
                         Terkonfirmasi
                       </div>
+                    ) : isCancelled ? (
+                      <div className="px-4 py-1.5 text-sm text-gray-500 border border-gray-300 rounded-md bg-gray-50">
+                        Dibatalkan
+                      </div>
                     ) : (
                       <button 
-                        onClick={() => handleConfirm(index)}
-                        disabled={!hasAnswer}
+                        onClick={() => handleConfirm(question.id)}
+                        disabled={(!isConfirmOnly && !hasAnswer) || !isAccessible || (isTransCancelled && question.id !== 0)}
                         className={clsx(
                           "px-4 py-1.5 text-sm border rounded-md transition-colors whitespace-nowrap",
-                          hasAnswer 
+                          (isConfirmOnly || hasAnswer) && isAccessible && (!isTransCancelled || question.id === 0)
                             ? "text-teal-600 border-teal-600 hover:bg-teal-50 cursor-pointer" 
                             : "text-gray-400 border-gray-300 cursor-not-allowed"
                         )}
@@ -328,7 +471,7 @@ export default function AdminGeneralDriver() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Cari transaksi..."
-              className="w-64 border rounded-lg pl-10 pr-4 py-2 focus:ring"
+              className="w-64 border rounded-lg pl-10 pr-4 py-2 focus:ring focus:ring-blue-200 focus:border-blue-500 outline-none"
             />
             <Icon icon="ic:outline-search" width={20} height={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           </div>
@@ -338,30 +481,46 @@ export default function AdminGeneralDriver() {
           <table className="min-w-full border-collapse">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                {[]
-                .concat(["Penyewa", "Kendaraan", "ID Transaksi", "Tanggal Sewa", "Status", "Lainnya"])
-                .map((h) => (
-                  <th key={h} className="px-4 py-2 text-left text-sm font-medium text-gray-700">{h}</th>
-                ))}
+                {["Penyewa", "Kendaraan", "ID Transaksi", "Tanggal Sewa", "Status", "Lainnya"]
+                  .map((h) => (
+                    <th key={h} className="px-4 py-2 text-left text-sm font-medium text-gray-700 border-b">
+                      {h}
+                    </th>
+                  ))}
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-gray-200">
               {filtered.map((t, i) => (
                 <React.Fragment key={t.id}>
-                  <tr className="hover:bg-gray-50">
+                  <tr className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-sm text-gray-800">{t.customer}</td>
                     <td className="px-4 py-3 text-sm text-gray-800">{t.vehicle}</td>
                     <td className="px-4 py-3 text-sm text-gray-800">{t.transactionId}</td>
                     <td className="px-4 py-3 text-sm text-gray-800">
-                      <div>{t.startDate}</div>
-                      <div>{t.endDate}</div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-gray-600">Mulai: {t.startDate}</div>
+                        <div className="text-xs text-gray-600">Selesai: {t.endDate}</div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={clsx("px-3 py-1 text-xs rounded-full", statusStyles[t.status])}>{t.status}</span>
+                      <span className={clsx(
+                        "px-3 py-1 text-xs rounded-full font-medium",
+                        statusStyles[t.status] || "bg-gray-100 text-gray-800 border border-gray-200"
+                      )}>
+                        {t.status}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button onClick={() => toggleRow(i)}>
-                        <Icon icon={expandedRow === i ? "tabler:chevron-up" : "tabler:chevron-down"} width={20} />
+                      <button 
+                        onClick={() => toggleRow(i)}
+                        className="p-1 hover:bg-gray-100 rounded transition-colors"
+                      >
+                        <Icon 
+                          icon={expandedRow === i ? "tabler:chevron-up" : "tabler:chevron-down"} 
+                          width={20} 
+                          height={20}
+                          className="text-gray-600"
+                        />
                       </button>
                     </td>
                   </tr>
@@ -376,7 +535,12 @@ export default function AdminGeneralDriver() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">Data tidak ditemukan</td>
+                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                    <div className="flex flex-col items-center gap-2">
+                      <Icon icon="tabler:inbox" width={48} height={48} className="text-gray-300" />
+                      <span>Data tidak ditemukan</span>
+                    </div>
+                  </td>
                 </tr>
               )}
             </tbody>
